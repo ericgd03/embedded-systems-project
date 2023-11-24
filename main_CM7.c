@@ -51,6 +51,7 @@
 SPI_HandleTypeDef hspi1;
 SPI_HandleTypeDef hspi2;
 
+TIM_HandleTypeDef htim2;
 TIM_HandleTypeDef htim17;
 
 UART_HandleTypeDef huart3;
@@ -96,16 +97,15 @@ static void MX_USART3_UART_Init(void);
 static void MX_TIM17_Init(void);
 static void MX_SPI1_Init(void);
 static void MX_SPI2_Init(void);
-
+static void MX_TIM2_Init(void);
 void StartDefaultTask(void *argument);
+
+/* USER CODE BEGIN PFP */
 void wirelessTask(void *argument);
 void imuTask(void *argument);
 void escServoTask(void *argument);
 
-/* USER CODE BEGIN PFP */
-
 void HAL_IMU_Read(uint8_t reg, uint8_t *data, uint8_t len);
-
 void HAL_IMU_Write(uint8_t reg, uint8_t data);
 
 /* USER CODE END PFP */
@@ -182,6 +182,7 @@ Error_Handler();
   MX_TIM17_Init();
   MX_SPI1_Init();
   MX_SPI2_Init();
+  MX_TIM2_Init();
   /* USER CODE BEGIN 2 */
 
   NRF24_begin(GPIOD, GPIO_PIN_5, GPIO_PIN_4, hspi2);
@@ -227,7 +228,7 @@ Error_Handler();
 
   /* Create the thread(s) */
   /* creation of defaultTask */
-//  defaultTaskHandle = osThreadNew(StartDefaultTask, NULL, &defaultTask_attributes);
+  defaultTaskHandle = osThreadNew(StartDefaultTask, NULL, &defaultTask_attributes);
 
   /* USER CODE BEGIN RTOS_THREADS */
   /* add threads, ... */
@@ -286,7 +287,7 @@ void SystemClock_Config(void)
   * in the RCC_OscInitTypeDef structure.
   */
   RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSE;
-  RCC_OscInitStruct.HSEState = RCC_HSE_BYPASS;
+  RCC_OscInitStruct.HSEState = RCC_HSE_ON;
   RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
   RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSE;
   RCC_OscInitStruct.PLL.PLLM = 1;
@@ -414,6 +415,65 @@ static void MX_SPI2_Init(void)
   /* USER CODE BEGIN SPI2_Init 2 */
 
   /* USER CODE END SPI2_Init 2 */
+
+}
+
+/**
+  * @brief TIM2 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_TIM2_Init(void)
+{
+
+  /* USER CODE BEGIN TIM2_Init 0 */
+
+  /* USER CODE END TIM2_Init 0 */
+
+  TIM_ClockConfigTypeDef sClockSourceConfig = {0};
+  TIM_MasterConfigTypeDef sMasterConfig = {0};
+  TIM_OC_InitTypeDef sConfigOC = {0};
+
+  /* USER CODE BEGIN TIM2_Init 1 */
+
+  /* USER CODE END TIM2_Init 1 */
+  htim2.Instance = TIM2;
+  htim2.Init.Prescaler = 22;
+  htim2.Init.CounterMode = TIM_COUNTERMODE_UP;
+  htim2.Init.Period = 65535;
+  htim2.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+  htim2.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_ENABLE;
+  if (HAL_TIM_Base_Init(&htim2) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_INTERNAL;
+  if (HAL_TIM_ConfigClockSource(&htim2, &sClockSourceConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  if (HAL_TIM_PWM_Init(&htim2) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
+  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
+  if (HAL_TIMEx_MasterConfigSynchronization(&htim2, &sMasterConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sConfigOC.OCMode = TIM_OCMODE_PWM1;
+  sConfigOC.Pulse = 0;
+  sConfigOC.OCPolarity = TIM_OCPOLARITY_HIGH;
+  sConfigOC.OCFastMode = TIM_OCFAST_DISABLE;
+  if (HAL_TIM_PWM_ConfigChannel(&htim2, &sConfigOC, TIM_CHANNEL_1) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN TIM2_Init 2 */
+
+  /* USER CODE END TIM2_Init 2 */
+  HAL_TIM_MspPostInit(&htim2);
 
 }
 
@@ -577,69 +637,6 @@ void HAL_IMU_Read(uint8_t reg, uint8_t *data, uint8_t len){
 	HAL_GPIO_WritePin(SPI1_CS_GPIO_Port, SPI1_CS_Pin, GPIO_PIN_SET);
 }
 
-/* USER CODE END 4 */
-
-/* USER CODE BEGIN Header_StartDefaultTask */
-/**
-  * @brief  Function implementing the defaultTask thread.
-  * @param  argument: Not used
-  * @retval None
-  */
-/* USER CODE END Header_StartDefaultTask */
-void StartDefaultTask(void *argument)
-{
-  /* USER CODE BEGIN 5 */
-
-	double d = 1.0;
-
-	double sum = 0.0;
-
-	HAL_TIM_Base_Start(&htim17);
-
-	uint16_t start_t = __HAL_TIM_GET_COUNTER(&htim17);
-
-	for(int i = 0; i < 10000000; i += 1){
-
-	  if ((i%2 == 0) && (i%8 != 0)){
-
-		  sum += 4.0 / d;
-	  }
-	  else if (i%8 == 0){
-
-	  }
-	  else{
-
-		  sum -= 4.0 / d;
-	  }
-	  d += 2.0;
-	}
-
-	do{ osDelay(1);
-
-	} while (*acum < 7.62937);
-
-		sum = sum + *acum;
-
-	uint16_t end_t = __HAL_TIM_GET_COUNTER(&htim17);
-
-	uint16_t total_t = end_t - start_t;
-
-	printf("Resultado = %f (%f seconds)\r\n", sum, ((float)total_t * 65535.0) / 240000000.0);
-
-  /* Infinite loop */
-
-  for(;;){
-
-	HAL_GPIO_TogglePin(LD1_GPIO_Port, LD1_Pin);
-
-//	printf("Hello from FreeRTOS STM32H7 world!\r\n");
-
-	osDelay(1000);
-  }
-
-  /* USER CODE END 5 */
-}
-
 void wirelessTask(void *argument){
 
 	uint16_t degrees;
@@ -754,6 +751,69 @@ void escServoTask(void *argument){
 		}
 		osDelay(1000);
 	}
+}
+
+/* USER CODE END 4 */
+
+/* USER CODE BEGIN Header_StartDefaultTask */
+/**
+  * @brief  Function implementing the defaultTask thread.
+  * @param  argument: Not used
+  * @retval None
+  */
+/* USER CODE END Header_StartDefaultTask */
+void StartDefaultTask(void *argument)
+{
+  /* USER CODE BEGIN 5 */
+
+	double d = 1.0;
+
+	double sum = 0.0;
+
+	HAL_TIM_Base_Start(&htim17);
+
+	uint16_t start_t = __HAL_TIM_GET_COUNTER(&htim17);
+
+	for(int i = 0; i < 10000000; i += 1){
+
+	  if ((i%2 == 0) && (i%8 != 0)){
+
+		  sum += 4.0 / d;
+	  }
+	  else if (i%8 == 0){
+
+	  }
+	  else{
+
+		  sum -= 4.0 / d;
+	  }
+	  d += 2.0;
+	}
+
+	do{ osDelay(1);
+
+	} while (*acum < 7.62937);
+
+		sum = sum + *acum;
+
+	uint16_t end_t = __HAL_TIM_GET_COUNTER(&htim17);
+
+	uint16_t total_t = end_t - start_t;
+
+	printf("Resultado = %f (%f seconds)\r\n", sum, ((float)total_t * 65535.0) / 240000000.0);
+
+  /* Infinite loop */
+
+  for(;;){
+
+	HAL_GPIO_TogglePin(LD1_GPIO_Port, LD1_Pin);
+
+//	printf("Hello from FreeRTOS STM32H7 world!\r\n");
+
+	osDelay(1000);
+  }
+
+  /* USER CODE END 5 */
 }
 
 /**
