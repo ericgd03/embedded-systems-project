@@ -64,6 +64,27 @@ const osThreadAttr_t defaultTask_attributes = {
 };
 /* USER CODE BEGIN PV */
 
+osThreadId_t wirelessTaskHandle;
+const osThreadAttr_t wirelessTask_attributes = {
+  .name = "wirelessTask",
+  .stack_size = 128 * 4,
+  .priority = (osPriority_t) osPriorityNormal,
+};
+
+osThreadId_t imuTaskHandle;
+const osThreadAttr_t imuTask_attributes = {
+  .name = "imuTask",
+  .stack_size = 128 * 4,
+  .priority = (osPriority_t) osPriorityNormal,
+};
+
+osThreadId_t escServoTaskHandle;
+const osThreadAttr_t escServoTask_attributes = {
+  .name = "escServoTask",
+  .stack_size = 128 * 4,
+  .priority = (osPriority_t) osPriorityNormal,
+};
+
 double *const acum = (double *)0x30000000;
 
 /* USER CODE END PV */
@@ -75,7 +96,11 @@ static void MX_USART3_UART_Init(void);
 static void MX_TIM17_Init(void);
 static void MX_SPI1_Init(void);
 static void MX_SPI2_Init(void);
+
 void StartDefaultTask(void *argument);
+void wirelessTask(void *argument);
+void imuTask(void *argument);
+void escServoTask(void *argument);
 
 /* USER CODE BEGIN PFP */
 
@@ -159,13 +184,6 @@ Error_Handler();
   MX_SPI2_Init();
   /* USER CODE BEGIN 2 */
 
-  int16_t accel_data;
-
-  uint8_t imu_data[14];
-
-//  HAL_IMU_Write(28, 0x08);
-
-
   NRF24_begin(GPIOD, GPIO_PIN_5, GPIO_PIN_4, hspi2);
 
   nrf24_DebugUART_Init(huart3);
@@ -213,6 +231,12 @@ Error_Handler();
 
   /* USER CODE BEGIN RTOS_THREADS */
   /* add threads, ... */
+  wirelessTaskHandle = osThreadNew(wirelessTask, NULL, &wirelessTask_attributes);
+
+  imuTaskHandle = osThreadNew(imuTask, NULL, &imuTask_attributes);
+
+  escServoTaskHandle = osThreadNew(escServoTask, NULL, &escServoTask_attributes);
+
   /* USER CODE END RTOS_THREADS */
 
   /* USER CODE BEGIN RTOS_EVENTS */
@@ -227,16 +251,6 @@ Error_Handler();
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-
-	  HAL_IMU_Read(59, imu_data, sizeof(imu_data));
-
-	  accel_data = ((int16_t)imu_data[0]<<8) + imu_data[1];
-
-	  printf("Acceleration: %d\n\r", accel_data);
-
-	  HAL_Delay(500);
-
-
 //	  HAL_GPIO_TogglePin(LD1_GPIO_Port, LD1_Pin);
 
 //	  HAL_Delay(100);
@@ -245,18 +259,6 @@ Error_Handler();
 
     /* USER CODE BEGIN 3 */
 
-	  if(NRF24_available()){
-
-		  printf("Hola\n\r");
-
-		  NRF24_read(myRxData, 32);
-
-		  myRxData[32] = '\r'; myRxData[32+1] = '\n';
-
-//		  HAL_UART_Transmit(&huart3, (uint8_t *)myRxData, 32+2, 10);
-
-		  printf("Recibido: %d %d %d %d %d %d \n\r", myRxData[0], myRxData[1], myRxData[2], myRxData[3], myRxData[4], myRxData[5]);
-	  }
   }
   /* USER CODE END 3 */
 }
@@ -636,6 +638,122 @@ void StartDefaultTask(void *argument)
   }
 
   /* USER CODE END 5 */
+}
+
+void wirelessTask(void *argument){
+
+	uint16_t degrees;
+
+	uint16_t xPosition;
+
+	uint16_t yPosition;
+
+	for(;;){
+
+		if(NRF24_available()){
+
+			NRF24_read(myRxData, 32);
+
+			myRxData[32] = '\r'; myRxData[32+1] = '\n';
+
+//			HAL_UART_Transmit(&huart3, (uint8_t *)myRxData, 32+2, 10);
+
+			if (myRxData[0] == 1){
+
+				xPosition = (uint8_t)255 + myRxData[1];
+			}
+			else{
+
+				xPosition = myRxData[1];
+			}
+			if (myRxData[2] == 1){
+
+				yPosition = (uint8_t)255 + myRxData[3];
+			}
+			else{
+
+				yPosition = myRxData[3];
+			}
+			if (myRxData[4] == 1){
+
+				degrees = (uint8_t)255 + myRxData[5];
+			}
+			else{
+
+				degrees = myRxData[5];
+			}
+
+//			printf("%d %d %d %d %d %d \n\r", myRxData[0], myRxData[1], myRxData[2], myRxData[3], myRxData[4], myRxData[5]);
+
+			printf("X: %d Y: %d A: %d \n\r", xPosition, yPosition, degrees);
+
+//			osDelay(500);
+		}
+	}
+}
+
+void imuTask(void *argument){
+
+	int16_t accel_data;
+
+	uint8_t imu_data[14];
+
+//	  HAL_IMU_Write(28, 0x08);
+
+	for(;;){
+
+		HAL_IMU_Read(59, imu_data, sizeof(imu_data));
+
+		accel_data = ((int16_t)imu_data[0]<<8) + imu_data[1];
+
+		printf("Acceleration: %d\n\r", accel_data);
+
+		osDelay(500);
+	}
+}
+
+void escServoTask(void *argument){
+
+	int32_t CH1_DC = 0;
+
+	double tOnN = 0.0015; // Neutral
+	double tOnF = 0.002;  // Forward
+	double tOnB = 0.001;  // Reverse
+	double period = 0.02; // Period
+
+	double dutyCycle1 = tOnF / period;
+	double dutyCycle2 = tOnN / period;
+	double dutyCycle3 = tOnB / period;
+
+	int32_t CH1_DC_MAX = TIM2->ARR * dutyCycle1;
+	int32_t CH1_DC_MIN = TIM2->ARR * dutyCycle2;
+	int32_t CH1_DC_IZQ = TIM2->ARR * dutyCycle3;
+
+//	int32_t CH1_DC_MAX = 65535;
+//	int32_t CH1_DC_MIN = 4915;
+
+	for(;;){
+
+		while(CH1_DC < CH1_DC_MAX){
+
+			TIM2->CCR1 = CH1_DC;
+
+			CH1_DC += 1;
+
+			osDelay(1);
+		}
+		osDelay(5000);
+
+		while(CH1_DC > CH1_DC_MIN){
+
+			TIM2->CCR1 = CH1_DC;
+
+			CH1_DC -= 1;
+
+			osDelay(1);
+		}
+		osDelay(1000);
+	}
 }
 
 /**
