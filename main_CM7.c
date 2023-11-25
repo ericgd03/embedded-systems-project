@@ -52,6 +52,7 @@ SPI_HandleTypeDef hspi1;
 SPI_HandleTypeDef hspi2;
 
 TIM_HandleTypeDef htim2;
+TIM_HandleTypeDef htim3;
 TIM_HandleTypeDef htim17;
 
 UART_HandleTypeDef huart3;
@@ -79,9 +80,16 @@ const osThreadAttr_t imuTask_attributes = {
   .priority = (osPriority_t) osPriorityNormal,
 };
 
-osThreadId_t escServoTaskHandle;
-const osThreadAttr_t escServoTask_attributes = {
-  .name = "escServoTask",
+osThreadId_t escTaskHandle;
+const osThreadAttr_t escTask_attributes = {
+  .name = "escTask",
+  .stack_size = 128 * 4,
+  .priority = (osPriority_t) osPriorityNormal,
+};
+
+osThreadId_t servoTaskHandle;
+const osThreadAttr_t servoTask_attributes = {
+  .name = "servoTask",
   .stack_size = 128 * 4,
   .priority = (osPriority_t) osPriorityNormal,
 };
@@ -98,12 +106,14 @@ static void MX_TIM17_Init(void);
 static void MX_SPI1_Init(void);
 static void MX_SPI2_Init(void);
 static void MX_TIM2_Init(void);
+static void MX_TIM3_Init(void);
 void StartDefaultTask(void *argument);
 
 /* USER CODE BEGIN PFP */
 void wirelessTask(void *argument);
 void imuTask(void *argument);
-void escServoTask(void *argument);
+void escTask(void *argument);
+void servoTask(void *argument);
 
 void HAL_IMU_Read(uint8_t reg, uint8_t *data, uint8_t len);
 void HAL_IMU_Write(uint8_t reg, uint8_t data);
@@ -114,7 +124,6 @@ void HAL_IMU_Write(uint8_t reg, uint8_t data);
 /* USER CODE BEGIN 0 */
 
 uint64_t RxpipeAddrs = 0x11223344AA;
-
 uint8_t myRxData[50];
 
 /* USER CODE END 0 */
@@ -183,27 +192,22 @@ Error_Handler();
   MX_SPI1_Init();
   MX_SPI2_Init();
   MX_TIM2_Init();
+  MX_TIM3_Init();
   /* USER CODE BEGIN 2 */
 
   NRF24_begin(GPIOD, GPIO_PIN_5, GPIO_PIN_4, hspi2);
-
   nrf24_DebugUART_Init(huart3);
-
   NRF24_setAutoAck(false);
-
   NRF24_setChannel(52);
-
   NRF24_setPayloadSize(32);
-
   NRF24_openReadingPipe(0, RxpipeAddrs);
-
   NRF24_enableDynamicPayloads();
-
 //  NRF24_enableAckPayload();
-
   printRadioSettings();
-
   NRF24_startListening();
+
+  HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_1);
+  HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_1);
 
   /* USER CODE END 2 */
 
@@ -228,15 +232,14 @@ Error_Handler();
 
   /* Create the thread(s) */
   /* creation of defaultTask */
-  defaultTaskHandle = osThreadNew(StartDefaultTask, NULL, &defaultTask_attributes);
+//  defaultTaskHandle = osThreadNew(StartDefaultTask, NULL, &defaultTask_attributes);
 
   /* USER CODE BEGIN RTOS_THREADS */
   /* add threads, ... */
   wirelessTaskHandle = osThreadNew(wirelessTask, NULL, &wirelessTask_attributes);
-
   imuTaskHandle = osThreadNew(imuTask, NULL, &imuTask_attributes);
-
-  escServoTaskHandle = osThreadNew(escServoTask, NULL, &escServoTask_attributes);
+  escTaskHandle = osThreadNew(escTask, NULL, &escTask_attributes);
+  servoTaskHandle = osThreadNew(servoTask, NULL, &servoTask_attributes);
 
   /* USER CODE END RTOS_THREADS */
 
@@ -478,6 +481,65 @@ static void MX_TIM2_Init(void)
 }
 
 /**
+  * @brief TIM3 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_TIM3_Init(void)
+{
+
+  /* USER CODE BEGIN TIM3_Init 0 */
+
+  /* USER CODE END TIM3_Init 0 */
+
+  TIM_ClockConfigTypeDef sClockSourceConfig = {0};
+  TIM_MasterConfigTypeDef sMasterConfig = {0};
+  TIM_OC_InitTypeDef sConfigOC = {0};
+
+  /* USER CODE BEGIN TIM3_Init 1 */
+
+  /* USER CODE END TIM3_Init 1 */
+  htim3.Instance = TIM3;
+  htim3.Init.Prescaler = 22;
+  htim3.Init.CounterMode = TIM_COUNTERMODE_UP;
+  htim3.Init.Period = 65535;
+  htim3.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+  htim3.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_ENABLE;
+  if (HAL_TIM_Base_Init(&htim3) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_INTERNAL;
+  if (HAL_TIM_ConfigClockSource(&htim3, &sClockSourceConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  if (HAL_TIM_PWM_Init(&htim3) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
+  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
+  if (HAL_TIMEx_MasterConfigSynchronization(&htim3, &sMasterConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sConfigOC.OCMode = TIM_OCMODE_PWM1;
+  sConfigOC.Pulse = 0;
+  sConfigOC.OCPolarity = TIM_OCPOLARITY_HIGH;
+  sConfigOC.OCFastMode = TIM_OCFAST_DISABLE;
+  if (HAL_TIM_PWM_ConfigChannel(&htim3, &sConfigOC, TIM_CHANNEL_1) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN TIM3_Init 2 */
+
+  /* USER CODE END TIM3_Init 2 */
+  HAL_TIM_MspPostInit(&htim3);
+
+}
+
+/**
   * @brief TIM17 Initialization Function
   * @param None
   * @retval None
@@ -705,11 +767,11 @@ void imuTask(void *argument){
 
 		printf("Acceleration: %d\n\r", accel_data);
 
-		osDelay(500);
+		osDelay(1000);
 	}
 }
 
-void escServoTask(void *argument){
+void escTask(void *argument){
 
 	int32_t CH1_DC = 0;
 
@@ -718,13 +780,13 @@ void escServoTask(void *argument){
 	double tOnB = 0.001;  // Reverse
 	double period = 0.02; // Period
 
-	double dutyCycle1 = tOnF / period;
-	double dutyCycle2 = tOnN / period;
-	double dutyCycle3 = tOnB / period;
+	double dutyCycleForward = tOnF / period;
+	double dutyCycleNeutral = tOnN / period;
+	double dutyCycleBackwards = tOnB / period;
 
-	int32_t CH1_DC_MAX = TIM2->ARR * dutyCycle1;
-	int32_t CH1_DC_MIN = TIM2->ARR * dutyCycle2;
-	int32_t CH1_DC_IZQ = TIM2->ARR * dutyCycle3;
+	int32_t CH1_DC_MAX = TIM2->ARR * dutyCycleForward;
+	int32_t CH1_DC_MIN = TIM2->ARR * dutyCycleNeutral;
+	int32_t CH1_DC_IZQ = TIM2->ARR * dutyCycleBackwards;
 
 //	int32_t CH1_DC_MAX = 65535;
 //	int32_t CH1_DC_MIN = 4915;
@@ -750,6 +812,45 @@ void escServoTask(void *argument){
 			osDelay(1);
 		}
 		osDelay(1000);
+	}
+}
+
+void servoTask(void *argument){
+
+	int32_t CH1_DC = 0;
+
+	double tOnN = 0.0015; // Neutral
+	double tOnF = 0.002;  // Forward
+	double tOnB = 0.001;  // Reverse
+	double period = 0.02; // Period
+
+	double dutyCycleForward = tOnF / period;
+	double dutyCycleNeutral = tOnN / period;
+	double dutyCycleBackwards = tOnB / period;
+
+	int32_t CH1_DC_MAX = TIM3->ARR * dutyCycleForward;
+	int32_t CH1_DC_MIN = TIM3->ARR * dutyCycleNeutral;
+	int32_t CH1_DC_IZQ = TIM3->ARR * dutyCycleBackwards;
+
+	CH1_DC_MAX = 6100;
+
+	for(;;){
+
+		__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, CH1_DC_MIN);
+
+		osDelay(2000);
+
+		__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, CH1_DC_MAX);
+
+		osDelay(2000);
+
+		__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, CH1_DC_MIN);
+
+		osDelay(2000);
+
+		__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, CH1_DC_IZQ);
+
+		osDelay(2000);
 	}
 }
 
