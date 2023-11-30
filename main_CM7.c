@@ -48,6 +48,8 @@
 
 /* Private variables ---------------------------------------------------------*/
 
+FDCAN_HandleTypeDef hfdcan1;
+
 SPI_HandleTypeDef hspi1;
 SPI_HandleTypeDef hspi2;
 
@@ -94,7 +96,20 @@ const osThreadAttr_t servoTask_attributes = {
   .priority = (osPriority_t) osPriorityNormal,
 };
 
+osThreadId_t canTaskHandle;
+const osThreadAttr_t canTask_attributes = {
+  .name = "canTask",
+  .stack_size = 128 * 4,
+  .priority = (osPriority_t) osPriorityNormal,
+};
+
 double *const acum = (double *)0x30000000;
+
+FDCAN_FilterTypeDef sFilterConfig;
+FDCAN_TxHeaderTypeDef TxHeader;
+FDCAN_RxHeaderTypeDef RxHeader;
+uint8_t TxData[8] = {0x10, 0x34, 0x54, 0x76, 0x98, 0x00, 0x11, 0x22};
+uint8_t RxData[8];
 
 /* USER CODE END PV */
 
@@ -107,6 +122,7 @@ static void MX_SPI1_Init(void);
 static void MX_SPI2_Init(void);
 static void MX_TIM2_Init(void);
 static void MX_TIM3_Init(void);
+static void MX_FDCAN1_Init(void);
 void StartDefaultTask(void *argument);
 
 /* USER CODE BEGIN PFP */
@@ -114,6 +130,7 @@ void wirelessTask(void *argument);
 void imuTask(void *argument);
 void escTask(void *argument);
 void servoTask(void *argument);
+void canTask(void *argument);
 
 void HAL_IMU_Read(uint8_t reg, uint8_t *data, uint8_t len);
 void HAL_IMU_Write(uint8_t reg, uint8_t data);
@@ -125,6 +142,8 @@ void HAL_IMU_Write(uint8_t reg, uint8_t data);
 
 uint64_t RxpipeAddrs = 0x11223344AA;
 uint8_t myRxData[50];
+
+uint16_t currentXPosition = 0;
 
 /* USER CODE END 0 */
 
@@ -193,6 +212,7 @@ Error_Handler();
   MX_SPI2_Init();
   MX_TIM2_Init();
   MX_TIM3_Init();
+  MX_FDCAN1_Init();
   /* USER CODE BEGIN 2 */
 
   NRF24_begin(GPIOD, GPIO_PIN_5, GPIO_PIN_4, hspi2);
@@ -203,7 +223,7 @@ Error_Handler();
   NRF24_openReadingPipe(0, RxpipeAddrs);
   NRF24_enableDynamicPayloads();
 //  NRF24_enableAckPayload();
-  printRadioSettings();
+//  printRadioSettings();
   NRF24_startListening();
 
   HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_1);
@@ -236,10 +256,11 @@ Error_Handler();
 
   /* USER CODE BEGIN RTOS_THREADS */
   /* add threads, ... */
-  wirelessTaskHandle = osThreadNew(wirelessTask, NULL, &wirelessTask_attributes);
-  imuTaskHandle = osThreadNew(imuTask, NULL, &imuTask_attributes);
-  escTaskHandle = osThreadNew(escTask, NULL, &escTask_attributes);
-  servoTaskHandle = osThreadNew(servoTask, NULL, &servoTask_attributes);
+//  wirelessTaskHandle = osThreadNew(wirelessTask, NULL, &wirelessTask_attributes);
+//  imuTaskHandle = osThreadNew(imuTask, NULL, &imuTask_attributes);
+//  escTaskHandle = osThreadNew(escTask, NULL, &escTask_attributes);
+//  servoTaskHandle = osThreadNew(servoTask, NULL, &servoTask_attributes);
+  canTaskHandle = osThreadNew(canTask, NULL, &canTask_attributes);
 
   /* USER CODE END RTOS_THREADS */
 
@@ -294,13 +315,13 @@ void SystemClock_Config(void)
   RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
   RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSE;
   RCC_OscInitStruct.PLL.PLLM = 1;
-  RCC_OscInitStruct.PLL.PLLN = 18;
+  RCC_OscInitStruct.PLL.PLLN = 20;
   RCC_OscInitStruct.PLL.PLLP = 2;
-  RCC_OscInitStruct.PLL.PLLQ = 2;
+  RCC_OscInitStruct.PLL.PLLQ = 4;
   RCC_OscInitStruct.PLL.PLLR = 2;
   RCC_OscInitStruct.PLL.PLLRGE = RCC_PLL1VCIRANGE_3;
   RCC_OscInitStruct.PLL.PLLVCOSEL = RCC_PLL1VCOMEDIUM;
-  RCC_OscInitStruct.PLL.PLLFRACN = 6144;
+  RCC_OscInitStruct.PLL.PLLFRACN = 0;
   if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK)
   {
     Error_Handler();
@@ -323,6 +344,98 @@ void SystemClock_Config(void)
   {
     Error_Handler();
   }
+}
+
+/**
+  * @brief FDCAN1 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_FDCAN1_Init(void)
+{
+
+  /* USER CODE BEGIN FDCAN1_Init 0 */
+
+  /* USER CODE END FDCAN1_Init 0 */
+
+  /* USER CODE BEGIN FDCAN1_Init 1 */
+
+  /* USER CODE END FDCAN1_Init 1 */
+  hfdcan1.Instance = FDCAN1;
+  hfdcan1.Init.FrameFormat = FDCAN_FRAME_CLASSIC;
+  hfdcan1.Init.Mode = FDCAN_MODE_NORMAL;
+  hfdcan1.Init.AutoRetransmission = DISABLE;
+  hfdcan1.Init.TransmitPause = DISABLE;
+  hfdcan1.Init.ProtocolException = ENABLE;
+  hfdcan1.Init.NominalPrescaler = 2;
+  hfdcan1.Init.NominalSyncJumpWidth = 8;
+  hfdcan1.Init.NominalTimeSeg1 = 0x1F;
+  hfdcan1.Init.NominalTimeSeg2 = 8;
+  hfdcan1.Init.DataPrescaler = 1;
+  hfdcan1.Init.DataSyncJumpWidth = 1;
+  hfdcan1.Init.DataTimeSeg1 = 1;
+  hfdcan1.Init.DataTimeSeg2 = 1;
+  hfdcan1.Init.MessageRAMOffset = 0;
+  hfdcan1.Init.StdFiltersNbr = 1;
+  hfdcan1.Init.ExtFiltersNbr = 0;
+  hfdcan1.Init.RxFifo0ElmtsNbr = 1;
+  hfdcan1.Init.RxFifo0ElmtSize = FDCAN_DATA_BYTES_8;
+  hfdcan1.Init.RxFifo1ElmtsNbr = 0;
+  hfdcan1.Init.RxFifo1ElmtSize = FDCAN_DATA_BYTES_8;
+  hfdcan1.Init.RxBuffersNbr = 0;
+  hfdcan1.Init.RxBufferSize = FDCAN_DATA_BYTES_8;
+  hfdcan1.Init.TxEventsNbr = 0;
+  hfdcan1.Init.TxBuffersNbr = 0;
+  hfdcan1.Init.TxFifoQueueElmtsNbr = 1;
+  hfdcan1.Init.TxFifoQueueMode = FDCAN_TX_FIFO_OPERATION;
+  hfdcan1.Init.TxElmtSize = FDCAN_DATA_BYTES_8;
+  if (HAL_FDCAN_Init(&hfdcan1) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN FDCAN1_Init 2 */
+  /*AAO+*/
+	/* Configure Rx filter */
+	sFilterConfig.IdType = FDCAN_STANDARD_ID;
+	sFilterConfig.FilterIndex = 0;
+	sFilterConfig.FilterType = FDCAN_FILTER_MASK;
+	sFilterConfig.FilterConfig = FDCAN_FILTER_TO_RXFIFO0;
+//	sFilterConfig.FilterID1 = 0x321;
+//	sFilterConfig.FilterID2 = 0x7FF;
+	sFilterConfig.FilterID1 = 0x000;
+	sFilterConfig.FilterID2 = 0x000;
+
+	/* Configure global filter to reject all non-matching frames */
+	HAL_FDCAN_ConfigGlobalFilter(&hfdcan1, FDCAN_REJECT, FDCAN_REJECT, FDCAN_REJECT_REMOTE, FDCAN_REJECT_REMOTE);
+
+	if (HAL_FDCAN_ConfigFilter(&hfdcan1, &sFilterConfig) != HAL_OK)
+	{
+	  /* Filter configuration Error */
+	  Error_Handler();
+	}
+	/* Start the FDCAN module */
+	if (HAL_FDCAN_Start(&hfdcan1) != HAL_OK) {
+	}
+	  /* Start Error */
+	if (HAL_FDCAN_ActivateNotification(&hfdcan1, FDCAN_IT_RX_FIFO0_NEW_MESSAGE, 0) != HAL_OK) {
+	}
+	  /* Notification Error */
+
+	/* Configure Tx buffer message */
+	TxHeader.Identifier = 0x111;
+	TxHeader.IdType = FDCAN_STANDARD_ID;
+	TxHeader.TxFrameType = FDCAN_DATA_FRAME;
+	TxHeader.DataLength = FDCAN_DLC_BYTES_12;
+	TxHeader.ErrorStateIndicator = FDCAN_ESI_ACTIVE;
+	TxHeader.BitRateSwitch = FDCAN_BRS_ON;
+	TxHeader.FDFormat = FDCAN_FD_CAN;
+	TxHeader.TxEventFifoControl = FDCAN_NO_TX_EVENTS;
+	TxHeader.MessageMarker = 0x00;
+	/*AAO-*/
+
+
+  /* USER CODE END FDCAN1_Init 2 */
+
 }
 
 /**
@@ -720,10 +833,14 @@ void wirelessTask(void *argument){
 			if (myRxData[0] == 1){
 
 				xPosition = (uint8_t)255 + myRxData[1];
+
+				currentXPosition = xPosition;
 			}
 			else{
 
 				xPosition = myRxData[1];
+
+				currentXPosition = xPosition;
 			}
 			if (myRxData[2] == 1){
 
@@ -744,7 +861,7 @@ void wirelessTask(void *argument){
 
 //			printf("%d %d %d %d %d %d \n\r", myRxData[0], myRxData[1], myRxData[2], myRxData[3], myRxData[4], myRxData[5]);
 
-			printf("X: %d Y: %d A: %d \n\r", xPosition, yPosition, degrees);
+//			printf("X: %d Y: %d A: %d \n\r", xPosition, yPosition, degrees);
 
 //			osDelay(500);
 		}
@@ -753,65 +870,120 @@ void wirelessTask(void *argument){
 
 void imuTask(void *argument){
 
-	int16_t accel_data;
+	int16_t accel_data_x;
+	int16_t accel_data_y;
+	int16_t accel_data_z;
 
 	uint8_t imu_data[14];
+
+	int16_t movingAverage;
 
 //	  HAL_IMU_Write(28, 0x08);
 
 	for(;;){
 
-		HAL_IMU_Read(59, imu_data, sizeof(imu_data));
+		for (int i = 0; i < 4; i++){
 
-		accel_data = ((int16_t)imu_data[0]<<8) + imu_data[1];
+			HAL_IMU_Read(67, imu_data, sizeof(imu_data));
 
-		printf("Acceleration: %d\n\r", accel_data);
+			accel_data_x = ((int16_t)imu_data[0]<<8) + imu_data[1];
 
-		osDelay(1000);
+			movingAverage += accel_data_x;
+		}
+		movingAverage = movingAverage / 5;
+
+		printf("Gyro_x: %d\n\r", movingAverage);
+
+		for (int i = 0; i < 4; i++){
+
+			HAL_IMU_Read(69, imu_data, sizeof(imu_data));
+
+			accel_data_y = ((int16_t)imu_data[0]<<8) + imu_data[1];
+
+			movingAverage += accel_data_y;
+		}
+		movingAverage = movingAverage / 5;
+
+		printf("Gyro_y: %d\n\r", movingAverage);
+
+		for (int i = 0; i < 4; i++){
+
+			HAL_IMU_Read(70, imu_data, sizeof(imu_data));
+
+			accel_data_z = ((int16_t)imu_data[0]<<8) + imu_data[1];
+
+			movingAverage += accel_data_z;
+		}
+		movingAverage = movingAverage / 5;
+
+		printf("Gyro_z: %d\n\r", movingAverage);
+
+		//osDelay(1000);
 	}
 }
 
 void escTask(void *argument){
 
 	int32_t CH1_DC = 0;
-
+//
 	double tOnN = 0.0015; // Neutral
 	double tOnF = 0.002;  // Forward
-	double tOnB = 0.001;  // Reverse
+//	double tOnB = 0.001;  // Reverse
 	double period = 0.02; // Period
-
+//
 	double dutyCycleForward = tOnF / period;
 	double dutyCycleNeutral = tOnN / period;
-	double dutyCycleBackwards = tOnB / period;
-
+//	double dutyCycleBackwards = tOnB / period;
+//
 	int32_t CH1_DC_MAX = TIM2->ARR * dutyCycleForward;
 	int32_t CH1_DC_MIN = TIM2->ARR * dutyCycleNeutral;
-	int32_t CH1_DC_IZQ = TIM2->ARR * dutyCycleBackwards;
-
-//	int32_t CH1_DC_MAX = 65535;
-//	int32_t CH1_DC_MIN = 4915;
+//	int32_t CH1_DC_IZQ = TIM2->ARR * dutyCycleBackwards;
 
 	for(;;){
 
-		while(CH1_DC < CH1_DC_MAX){
+//		while(CH1_DC < CH1_DC_MAX){
+//
+//			TIM2->CCR1 = CH1_DC;
+//
+//			CH1_DC += 1;
+//
+//			osDelay(1);
+//		}
+//		osDelay(5000);
+//
+//		while(CH1_DC > CH1_DC_MIN){
+//
+//			TIM2->CCR1 = CH1_DC;
+//
+//			CH1_DC -= 1;
+//
+//			osDelay(1);
+//		}
+//		osDelay(1000);
 
-			TIM2->CCR1 = CH1_DC;
+		do{
+			printf("X: %d \n\r", currentXPosition);
 
-			CH1_DC += 1;
+			while(CH1_DC < CH1_DC_MAX){
 
-			osDelay(1);
-		}
-		osDelay(5000);
+				TIM2->CCR1 = CH1_DC;
 
-		while(CH1_DC > CH1_DC_MIN){
+				CH1_DC += 1;
+
+				osDelay(1);
+			}
+
+		} while (currentXPosition < (uint16_t)200);
+
+		while(CH1_DC > 0){
 
 			TIM2->CCR1 = CH1_DC;
 
 			CH1_DC -= 1;
 
-			osDelay(1);
+//			osDelay(1);
 		}
-		osDelay(1000);
+//		osDelay(500);
 	}
 }
 
@@ -851,6 +1023,26 @@ void servoTask(void *argument){
 		__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, CH1_DC_IZQ);
 
 		osDelay(2000);
+	}
+}
+
+void canTask(void *argument){
+
+	for(;;){
+
+		while (HAL_FDCAN_GetRxMessage(&hfdcan1, FDCAN_RX_FIFO0, &RxHeader, RxData) != HAL_OK);
+
+//		osDelay(10);
+
+		printf("\n\rCAN ID: %lx", RxHeader.Identifier);
+
+		printf(" [%X] ",((unsigned int)RxHeader.DataLength & 0x00F0000) >> 16);
+
+		printf(" %02X %02X %02X %02X %02X %02X %02X %02X", RxData[0],RxData[1],RxData[2],RxData[3],RxData[4],RxData[5],RxData[6],RxData[7]);
+
+		HAL_GPIO_TogglePin(LD1_GPIO_Port,LD1_Pin);
+
+//		osDelay(100);
 	}
 }
 
